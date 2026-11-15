@@ -62,10 +62,15 @@ jobs:
             --exclude 'env/*.env' \
             ./ "$VPS_USER@$VPS_HOST:deploy/"
 
+      # flock: waits for any other deploy on the VPS (service repos) to finish,
+      # so two `docker compose up` never recreate a container at once.
+      # The lock file lives outside ~/deploy, which rsync --delete manages.
       - name: Pull images and restart
         run: |
           ssh "$VPS_USER@$VPS_HOST" '
             set -e
+            exec 9> ~/.deploy.lock
+            flock -w 600 9
             cd deploy
             docker compose pull --quiet
             docker compose up -d --remove-orphans
