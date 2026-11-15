@@ -2,14 +2,17 @@
 
 The FCPX Studio stack on the VPS: Caddy, Postgres, Redis, the db migrations and every service, in one `docker-compose.yml`.
 
-No code is built here. Each repo publishes its own image to GHCR when a tag is pushed, and this repo only says which tag runs.
+No code is built here. Each repo publishes its own image to GHCR, and this repo defines how they run together.
 
 ```
-db repo         git tag v0.1.1 ──CI──> ghcr.io/fcpx-studio/db-migrate:v0.1.1
-AuthAPI repo    git tag v1.0.0 ──CI──> ghcr.io/fcpx-studio/auth-api:v1.0.0
-                                                │
-deploy repo     push to main ──CI── rsync + ssh ─┴─> VPS: docker compose pull && up -d
+db repo         git tag v0.1.1 ──CI──> ghcr.io/fcpx-studio/db-migrate:v0.1.1     (DB_MIGRATE_TAG in .env)
+AuthAPI repo    push to main  ──CI──> ghcr.io/fcpx-studio/auth-api:latest + :sha-<commit>
+                                └──── ssh: docker compose pull auth-api && up -d auth-api
+deploy repo     push to main  ──CI── rsync + ssh ──> VPS: docker compose pull && up -d
 ```
+
+Libraries (`db`, `events`) are released with git tags, because services pin them in `requirements.txt`.
+Services are not: every push to main is deployed.
 
 ## Layout
 
@@ -48,23 +51,44 @@ The role is created by `postgres/init/01-app-role.sh`, which Postgres only runs 
 
 | What changed            | Do                                                                     |
 |-------------------------|------------------------------------------------------------------------|
-| A service               | Tag it (`git tag v1.1.0 && git push origin v1.1.0`), wait for its Release workflow, set `<SERVICE>_TAG` in `~/deploy/.env` on the VPS, then run the Deploy workflow (Actions → Deploy → Run workflow) |
-| The schema (db repo)    | Tag db, set `DB_MIGRATE_TAG`, deploy. Then bump the db tag in each service's `requirements.txt` |
+| A service               | Push to its main: its workflow builds the image and restarts it on the VPS |
+| The schema (db repo)    | Tag db, set `DB_MIGRATE_TAG` in `~/deploy/.env`, run this repo's Deploy workflow (Actions → Deploy → Run workflow). Then bump the db tag in each service's `requirements.txt` |
 | This repo               | Push to main: deploys automatically                                    |
 
 `DB_MIGRATE_TAG` must always be at least the highest db tag pinned by a service (expand → contract, see the db README).
 
+### Rolling back a service
+
+Every image is also published as `:sha-<commit>` (see the package page on GHCR). On the VPS:
+
+```bash
+cd ~/deploy
+echo 'AUTH_API_TAG=sha-abc1234' >> .env
+docker compose up -d auth-api
+```
+
+Remove that line once the fix is pushed, otherwise the next deploy keeps running the old image.
+
 ### Adding a pending service
 
-`events-api`, `paddlesync` and `emailtalker` are in the `pending` profile until their image exists. To enable one: add a Release workflow to its repo (copy AuthAPI's), push a tag, set its tag in `.env`, fill `env/<service>.env`, remove its `profiles` line here and push.
+`events-api`, `paddlesync` and `emailtalker` are in the `pending` profile until their image exists. To enable one:
+1. Copy AuthAPI's `.github/workflows/deploy.yml` into its repo, and change `IMAGE` and `SERVICE`.
+2. Give it access to the org secrets (`DB_REPO_TOKEN`, `VPS_*`).
+3. Fill `env/<service>.env` on the VPS, remove its `profiles` line here and push this repo **first**.
+4. Push the service to main.
 
 ## First-time setup
 
 ### 1. GitHub
 
-- **db, AuthAPI repos:** the Release workflows push images with the built-in `GITHUB_TOKEN`. In the org settings, *Packages* must allow members to create packages.
-- **AuthAPI repo** (and every service that installs `db` or `events`): add an Actions secret `DB_REPO_TOKEN`, a fine-grained token with *Contents: Read-only* on `FCPX-Studio/db` (and `FCPX-Studio/events`).
-- **deploy repo:** create an environment `production` (Settings → Environments) with these secrets:
+- **db and service repos:** the workflows push images with the built-in `GITHUB_TOKEN`. In the org settings, *Packages* must allow members to create packages.
+- **Organization secrets** (FCPX-Studio → Settings → Secrets and variables → Actions), each shared with the repos that need it:
+
+  | Secret            | Repos            | Value                                                                 |
+  |-------------------|------------------|-----------------------------------------------------------------------|
+  | `DB_REPO_TOKEN`   | services         | fine-grained token, *Contents: Read-only* on `FCPX-Studio/db` and `FCPX-Studio/events` |
+
+  and, shared with `deploy` and every service:
 
   | Secret            | Value                                                                 |
   |-------------------|-----------------------------------------------------------------------|
@@ -113,6 +137,6 @@ This stack starts its own, empty Postgres. If the old Postgres on `internal-db-n
 docker compose ps
 docker compose logs -f auth-api
 docker compose run --rm db-migrate current        # current schema revision
-docker compose exec postgres psql -U fcpx_owner fcpx
+docker compose exec postgres psql -U admin fcpxstudio_db
 docker compose up -d                              # apply .env / env/*.env changes
 ```

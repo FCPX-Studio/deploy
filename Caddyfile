@@ -1,32 +1,16 @@
-# Caddy terminates HTTPS with an auto-renewed Let's Encrypt certificate
+# Caddy terminates HTTPS with auto-renewed Let's Encrypt certificates
 # and forwards plain HTTP to the API containers.
+#
+# SITE_ADDRESS (from .env) is the domain, e.g. fcpxstudio.shop. Both
+# api.<domain> and <domain> need a DNS A record pointing to the VPS.
 #
 # Each API serves its own prefix, /<API_NAME>/<API_VERSION>/ (e.g. /auth/v1/),
 # so Caddy routes on the first path segment and keeps the path as is.
 #
-# SITE_ADDRESS (from .env) is the VPS public IP for now, e.g. 51.x.x.x.
-# Let's Encrypt only issues IP certificates under the "shortlived" profile
-# (~6 days); Caddy renews them automatically.
-#
-# Transition: the domain names below are served alongside the IP while the
-# domain is being tested. They also get short-lived certificates for now.
-# Once confirmed, set SITE_ADDRESS=api.fcpxstudio.shop, drop the IP-only
-# parts (tls block, default_sni) to get regular 90-day certificates, and
-# move fcpxstudio.shop to the website's own site block.
+# <domain> serves the APIs too for now. When the website moves to it, give it
+# its own site block and keep only api.<domain> here.
 
-{
-	# Clients connecting by IP send no SNI (IPs aren't allowed in SNI), so
-	# tell Caddy which certificate to use for them. Harmless with a domain.
-	default_sni {$SITE_ADDRESS}
-}
-
-{$SITE_ADDRESS}, api.fcpxstudio.shop, fcpxstudio.shop {
-	tls {
-		issuer acme {
-			profile shortlived
-		}
-	}
-
+api.{$SITE_ADDRESS}, {$SITE_ADDRESS} {
 	handle /auth/* {
 		reverse_proxy auth-api:8000
 	}

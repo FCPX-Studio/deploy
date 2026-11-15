@@ -111,7 +111,7 @@ services:
 
   auth-api:
     <<: *app
-    image: ghcr.io/fcpx-studio/auth-api:${AUTH_API_TAG:?set AUTH_API_TAG in .env}
+    image: ghcr.io/fcpx-studio/auth-api:${AUTH_API_TAG:-latest}
     env_file: env/auth-api.env
     # Plain HTTP on 8000, only reachable by Caddy (no published ports)
     networks:
@@ -121,7 +121,7 @@ services:
   events-api:
     <<: *app
     profiles: ["pending"]
-    image: ghcr.io/fcpx-studio/events-api:${EVENTS_API_TAG:-unset}
+    image: ghcr.io/fcpx-studio/events-api:${EVENTS_API_TAG:-latest}
     env_file: env/events-api.env
     networks:
       - backend
@@ -131,13 +131,13 @@ services:
   paddlesync:
     <<: *app
     profiles: ["pending"]
-    image: ghcr.io/fcpx-studio/paddlesync:${PADDLESYNC_TAG:-unset}
+    image: ghcr.io/fcpx-studio/paddlesync:${PADDLESYNC_TAG:-latest}
     env_file: env/paddlesync.env
 
   emailtalker:
     <<: *app
     profiles: ["pending"]
-    image: ghcr.io/fcpx-studio/emailtalker:${EMAILTALKER_TAG:-unset}
+    image: ghcr.io/fcpx-studio/emailtalker:${EMAILTALKER_TAG:-latest}
     env_file: env/emailtalker.env
 
 networks:

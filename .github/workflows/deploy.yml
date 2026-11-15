@@ -1,6 +1,8 @@
 name: Deploy
 
 # Every push to main uploads the stack files to the VPS and restarts what changed.
+# Services deploy themselves: each service repo's workflow restarts only its
+# own container after pushing a new image.
 on:
   push:
     branches: [main]
@@ -30,6 +32,8 @@ jobs:
   deploy:
     needs: check
     runs-on: ubuntu-latest
+    # VPS_* come from this repo's production environment secrets, or from the
+    # organization secrets when the environment doesn't define them
     environment: production
     env:
       VPS_HOST: ${{ secrets.VPS_HOST }}
