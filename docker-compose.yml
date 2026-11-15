@@ -1,0 +1,153 @@
+# FCPX Studio stack on the VPS.
+#
+#   docker compose pull && docker compose up -d
+#
+# Image tags and SITE_ADDRESS come from .env (see .env.example).
+# Each service reads its own settings from env/<service>.env (see env/*.env.example).
+#
+# Start order: postgres -> db-migrate (applies migrations, exits) -> services.
+# Services in the "pending" profile have no published image yet: remove their
+# `profiles` line once the image exists on GHCR.
+
+name: fcpx
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+# Shared by every application service
+x-app: &app
+  <<: *logging
+  restart: unless-stopped
+  networks:
+    - backend
+  depends_on:
+    db-migrate:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+
+services:
+  # ---------------------------------------------------------------- edge
+
+  # Public entrypoint: HTTPS with Let's Encrypt certificates (see Caddyfile)
+  caddy:
+    <<: *logging
+    image: caddy:2.10
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in .env}
+    # The host's resolver (systemd-resolved, 127.0.0.53) is unreachable from
+    # inside the container, so use public resolvers to reach Let's Encrypt.
+    dns:
+      - 213.186.33.99 # OVH
+      - 1.1.1.1
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Must persist: holds certificates and ACME account (avoids rate limits)
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - web
+
+  # ---------------------------------------------------------------- data
+
+  postgres:
+    <<: *logging
+    image: postgres:17
+    restart: unless-stopped
+    env_file: env/postgres.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Runs once, on an empty data volume: creates the services' role
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - backend
+
+  redis:
+    <<: *logging
+    image: redis:7.4
+    restart: unless-stopped
+    env_file: env/redis.env
+    # redis.conf can't read env vars, so the password is passed on the command line
+    command: ["sh", "-c", "exec redis-server /usr/local/etc/redis/redis.conf --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - backend
+
+  # One-shot: applies the shared db migrations (alembic upgrade head), then exits.
+  # A no-op when the schema is already up to date. Built from the db repo.
+  db-migrate:
+    <<: *logging
+    image: ghcr.io/fcpx-studio/db-migrate:${DB_MIGRATE_TAG:?set DB_MIGRATE_TAG in .env}
+    restart: "no"
+    env_file: env/db-migrate.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+
+  # ---------------------------------------------------------------- services
+
+  auth-api:
+    <<: *app
+    image: ghcr.io/fcpx-studio/auth-api:${AUTH_API_TAG:?set AUTH_API_TAG in .env}
+    env_file: env/auth-api.env
+    # Plain HTTP on 8000, only reachable by Caddy (no published ports)
+    networks:
+      - backend
+      - web
+
+  events-api:
+    <<: *app
+    profiles: ["pending"]
+    image: ghcr.io/fcpx-studio/events-api:${EVENTS_API_TAG:-unset}
+    env_file: env/events-api.env
+    networks:
+      - backend
+      - web
+
+  # Workers: no HTTP, only Redis + Postgres
+  paddlesync:
+    <<: *app
+    profiles: ["pending"]
+    image: ghcr.io/fcpx-studio/paddlesync:${PADDLESYNC_TAG:-unset}
+    env_file: env/paddlesync.env
+
+  emailtalker:
+    <<: *app
+    profiles: ["pending"]
+    image: ghcr.io/fcpx-studio/emailtalker:${EMAILTALKER_TAG:-unset}
+    env_file: env/emailtalker.env
+
+networks:
+  # Caddy <-> public APIs
+  web:
+  # Services <-> Postgres / Redis (neither publishes a port on the host)
+  backend:
+
+volumes:
+  caddy_data:
+  caddy_config:
+  postgres_data:
+  redis_data:
