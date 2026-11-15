@@ -18,7 +18,7 @@ Services are not: every push to main is deployed.
 
 ```
 docker-compose.yml
-Caddyfile               # HTTPS + routing: /auth/* -> auth-api, /events/* -> events-api
+Caddyfile               # HTTPS + routing: /auth/* -> auth-api, /events/* -> event-api
 redis.conf              # AOF on, noeviction (streams are the queue)
 postgres/init/          # runs once on an empty volume: creates the services' role
 .env.example            # SITE_ADDRESS + image tags          -> .env on the VPS
@@ -31,7 +31,7 @@ env/*.env.example       # one per service                    -> env/*.env on the
 ## Start order
 
 ```
-postgres (healthy) ──> db-migrate (alembic upgrade head, exits 0) ──> auth-api, events-api, paddlesync, emailtalker
+postgres (healthy) ──> db-migrate (alembic upgrade head, exits 0) ──> auth-api, event-api, paddlesync, emailtalker
 redis (healthy) ─────────────────────────────────────────────────────┘
 ```
 
@@ -71,11 +71,14 @@ Remove that line once the fix is pushed, otherwise the next deploy keeps running
 
 ### Adding a pending service
 
-`events-api`, `paddlesync` and `emailtalker` are in the `pending` profile until their image exists. To enable one:
-1. Copy AuthAPI's `.github/workflows/deploy.yml` into its repo, and change `IMAGE` and `SERVICE`.
+`paddlesync` and `emailtalker` are in the `pending` profile until their image exists. To enable one:
+1. Copy AuthAPI's `Dockerfile` and `.github/workflows/deploy.yml` into its repo, and change `IMAGE` and `SERVICE`.
 2. Give it access to the org secrets (`DB_REPO_TOKEN`, `VPS_*`).
-3. Fill `env/<service>.env` on the VPS, remove its `profiles` line here and push this repo **first**.
-4. Push the service to main.
+3. Fill `env/<service>.env` on the VPS.
+4. Push the service to main: publishes the first image (its deploy job fails, the service isn't defined on the VPS yet).
+5. Remove its `profiles` line here and push this repo: pulls the image and starts the service.
+
+Pushing this repo before the image exists fails the Deploy workflow (`docker compose pull` can't find the image).
 
 ## First-time setup
 

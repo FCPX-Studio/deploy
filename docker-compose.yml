@@ -122,11 +122,12 @@ services:
       - backend
       - web
 
-  events-api:
+  # Paddle webhooks -> Redis streams, SSE to the website. Redis only (no Postgres)
+  event-api:
     <<: *app
-    profiles: ["pending"]
-    image: ghcr.io/fcpx-studio/events-api:${EVENTS_API_TAG:-latest}
-    env_file: env/events-api.env
+    image: ghcr.io/fcpx-studio/event-api:${EVENT_API_TAG:-latest}
+    env_file: env/event-api.env
+    # Plain HTTP on 8000, only reachable by Caddy (no published ports)
     networks:
       - backend
       - web
