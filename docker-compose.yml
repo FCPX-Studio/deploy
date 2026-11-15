@@ -64,6 +64,10 @@ services:
     image: postgres:17
     restart: unless-stopped
     env_file: env/postgres.env
+    # Loopback only: reachable from the VPS itself (SSH tunnel, e.g. TablePlus),
+    # never from the internet
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Runs once, on an empty data volume: creates the services' role
@@ -143,7 +147,7 @@ services:
 networks:
   # Caddy <-> public APIs
   web:
-  # Services <-> Postgres / Redis (neither publishes a port on the host)
+  # Services <-> Postgres / Redis (no public port; Postgres only on the VPS loopback)
   backend:
 
 volumes:
