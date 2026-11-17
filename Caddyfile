@@ -15,6 +15,11 @@ api.{$SITE_ADDRESS}, {$SITE_ADDRESS} {
 		reverse_proxy auth-api:8000
 	}
 
+	# Public catalog, read by the website server-side (read-only, catalog tables only)
+	handle /data/* {
+		reverse_proxy data-api:8000
+	}
+
 	# Paddle webhooks + SSE to the website (Caddy flushes text/event-stream as it comes)
 	handle /events/* {
 		reverse_proxy event-api:8000

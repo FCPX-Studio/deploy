@@ -124,6 +124,21 @@ services:
       - backend
       - web
 
+  # Public product catalog for the website. Postgres only, as a read-only role that can see the
+  # catalog tables only (no Redis: it starts without waiting for it)
+  data-api:
+    <<: *logging
+    restart: unless-stopped
+    image: ghcr.io/fcpx-studio/data-api:${DATA_API_TAG:-latest}
+    env_file: env/data-api.env
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    # Plain HTTP on 8000, only reachable by Caddy (no published ports)
+    networks:
+      - backend
+      - web
+
   # Paddle webhooks -> Redis streams, SSE to the website. Redis only (no Postgres)
   event-api:
     <<: *app

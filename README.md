@@ -18,9 +18,9 @@ Services are not: every push to main is deployed.
 
 ```
 docker-compose.yml
-Caddyfile               # HTTPS + routing: /auth/* -> auth-api, /events/* -> event-api
+Caddyfile               # HTTPS + routing: /auth/* -> auth-api, /data/* -> data-api, /events/* -> event-api
 redis.conf              # AOF on, noeviction (streams are the queue)
-postgres/init/          # runs once on an empty volume: creates the services' role
+postgres/init/          # runs once on an empty volume: creates the services' and DataAPI's roles
 .env.example            # SITE_ADDRESS + image tags          -> .env on the VPS
 env/*.env.example       # one per service                    -> env/*.env on the VPS
 .github/workflows/deploy.yml
@@ -39,13 +39,22 @@ If a migration fails, no service starts: `docker compose logs db-migrate`.
 
 ## Database roles
 
-| Role            | Used by    | Can                                  |
-|-----------------|------------|--------------------------------------|
-| `POSTGRES_USER` | db-migrate | owns the schema, creates/alters tables |
-| `APP_DB_USER`   | services   | SELECT / INSERT / UPDATE / DELETE only |
+| Role               | Used by    | Can                                  |
+|--------------------|------------|--------------------------------------|
+| `POSTGRES_USER`    | db-migrate | owns the schema, creates/alters tables |
+| `APP_DB_USER`      | services   | SELECT / INSERT / UPDATE / DELETE only |
+| `DATA_API_DB_USER` | data-api   | SELECT on `Product`, `ProductVersion`, `ProductLicense` only (member of `catalog_reader`) |
 
 Tables created by later migrations are granted to `APP_DB_USER` automatically (default privileges).
-The role is created by `postgres/init/01-app-role.sh`, which Postgres only runs on an **empty** data volume.
+`catalog_reader` is not: its grants live in the db migrations (revision 0009), so a new catalog table must be granted to it in its own migration. DataAPI is public, so it can't read users, orders or license keys.
+
+The roles are created by `postgres/init/01-app-role.sh` and `02-catalog-reader.sh`, which Postgres only runs on an **empty** data volume.
+On a volume that already exists, create DataAPI's role by hand, once, after db-migrate has applied revision 0009 (which creates `catalog_reader`):
+
+```bash
+docker compose exec postgres psql -U admin fcpxstudio_db \
+  -c "CREATE ROLE data_api LOGIN PASSWORD '<DATA_API_DB_PASSWORD>' IN ROLE catalog_reader;"
+```
 
 ## Releasing
 
@@ -71,7 +80,7 @@ Remove that line once the fix is pushed, otherwise the next deploy keeps running
 
 ### Adding a pending service
 
-`paddlesync` and `emailtalker` are in the `pending` profile until their image exists. To enable one:
+`data-api` and `emailtalker` are in the `pending` profile until their image exists. To enable one:
 1. Copy AuthAPI's `Dockerfile` and `.github/workflows/deploy.yml` into its repo, and change `IMAGE` and `SERVICE`.
 2. Give it access to the org secrets (`DB_REPO_TOKEN`, `VPS_*`).
 3. Fill `env/<service>.env` on the VPS.
