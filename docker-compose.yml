@@ -98,6 +98,26 @@ services:
     networks:
       - backend
 
+  # MQTT broker for the services' logs (logger package), read by the ESP32. See mosquitto/config/.
+  # - 1883: plain MQTT, internal only: the services publish on the backend network (MQTT_HOST=mosquitto)
+  # - 8883: TLS, published: the ESP32, read-only account. Certificate copied from Caddy by mosquitto/sync-certs.sh
+  # Doesn't start until mosquitto/secrets/ holds passwd, cert.pem and key.pem (see the README).
+  # The services don't depend on it: their logger reconnects on its own, and only console logs are kept meanwhile
+  mosquitto:
+    <<: *logging
+    image: eclipse-mosquitto:2.0
+    restart: unless-stopped
+    ports:
+      - "8883:8883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      # VPS only: accounts and certificate (gitignored, never uploaded or deleted by CI)
+      - ./mosquitto/secrets:/mosquitto/secrets:ro
+      # Retained messages (the last order) survive a restart
+      - mosquitto_data:/mosquitto/data
+    networks:
+      - backend
+
   # One-shot: applies the shared db migrations (alembic upgrade head), then exits.
   # A no-op when the schema is already up to date. Built from the db repo.
   db-migrate:
@@ -178,3 +198,4 @@ volumes:
   caddy_config:
   postgres_data:
   redis_data:
+  mosquitto_data:

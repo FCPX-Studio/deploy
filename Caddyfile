@@ -20,7 +20,9 @@ api.{$SITE_ADDRESS}, {$SITE_ADDRESS} {
 		reverse_proxy data-api:8000
 	}
 
-	# Paddle webhooks + SSE to the website (Caddy flushes text/event-stream as it comes)
+	# Paddle webhooks + the website's license claims (/events/v1/web/*).
+	# Never set `trusted_proxies`: without it, Caddy replaces any X-Forwarded-For sent by a client, so
+	# EventAPI's per-IP claim limits see the real client address (uvicorn --proxy-headers)
 	handle /events/* {
 		reverse_proxy event-api:8000
 	}
@@ -28,4 +30,11 @@ api.{$SITE_ADDRESS}, {$SITE_ADDRESS} {
 	handle {
 		respond 404
 	}
+}
+
+# MQTT broker (Mosquitto, port 8883). Caddy doesn't proxy it: this block only makes Caddy obtain and
+# renew the certificate of mqtt.<domain>, which mosquitto/sync-certs.sh copies to Mosquitto.
+# Needs a DNS A record for mqtt.<domain> pointing to the VPS
+mqtt.{$SITE_ADDRESS} {
+	respond 404
 }

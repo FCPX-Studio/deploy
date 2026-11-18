@@ -21,6 +21,10 @@ docker-compose.yml
 Caddyfile               # HTTPS + routing: /auth/* -> auth-api, /data/* -> data-api, /events/* -> event-api
 redis.conf              # AOF on, noeviction (streams are the queue)
 postgres/init/          # runs once on an empty volume: creates the services' and DataAPI's roles
+mosquitto/config/       # MQTT broker for the services' logs: mosquitto.conf, acl (who may publish / read what)
+mosquitto/passwd.sh     # create / change / delete an MQTT account
+mosquitto/sync-certs.sh # copy Caddy's mqtt.<domain> certificate to Mosquitto (daily cron)
+mosquitto/secrets/      # VPS only: passwd, cert.pem, key.pem (gitignored, never uploaded or deleted by CI)
 .env.example            # SITE_ADDRESS + image tags          -> .env on the VPS
 env/*.env.example       # one per service                    -> env/*.env on the VPS
 .github/workflows/deploy.yml
@@ -142,6 +146,62 @@ cd ~/AuthAPI && docker compose down
 Then run the Deploy workflow, or by hand: `cd ~/deploy && docker compose pull && docker compose up -d`.
 
 This stack starts its own, empty Postgres. If the old Postgres on `internal-db-network` holds data you need, dump it first (`pg_dump --data-only`) and restore it after db-migrate has created the tables.
+
+## MQTT (service logs → ESP32)
+
+Every service publishes its logs to Mosquitto (logger package, `fcpx/<raw|event>/<service>/…`), and the ESP32 reads them.
+
+| Listener | Who | Where |
+|---|---|---|
+| `1883`, plain | the services (`MQTT_HOST=mosquitto`) | `backend` network only, not published |
+| `8883`, TLS | the ESP32 | published on the VPS, `mqtt.<domain>` |
+
+Accounts, all required (no anonymous access), rights in `mosquitto/config/acl`:
+- one per service, named after its `LOG_SERVICE` (`dataapi`, `eventapi`, `authapi`, `paddlesync`): it may only publish under `fcpx/raw/<name>/#` and `fcpx/event/<name>/#`;
+- `esp32`: read only, `fcpx/#`.
+
+Mosquitto doesn't start until `mosquitto/secrets/` holds the accounts and the certificate (it restarts in a loop until then). The services don't wait for it: their logger reconnects on its own, and they keep logging to the console meanwhile.
+
+### First-time setup (on the VPS, in `~/deploy`)
+
+1. **DNS + firewall**: an A record `mqtt.<domain>` → the VPS, and port `8883/tcp` open. Deploy this repo: Caddy then obtains the certificate (`docker compose logs caddy`).
+2. **Certificate**:
+   ```bash
+   mosquitto/sync-certs.sh
+   ```
+   Then a daily cron renews it (`crontab -e`):
+   ```
+   17 4 * * * $HOME/deploy/mosquitto/sync-certs.sh >> $HOME/mqtt-certs.log 2>&1
+   ```
+3. **Accounts** (each one prompts for its password twice. Generate with `openssl rand -base64 24`, and keep them in a password manager: Mosquitto only stores hashes):
+   ```bash
+   mosquitto/passwd.sh esp32
+   mosquitto/passwd.sh dataapi
+   mosquitto/passwd.sh eventapi
+   mosquitto/passwd.sh authapi
+   mosquitto/passwd.sh paddlesync
+   ```
+4. **Services**: in each `env/<service>.env`, `MQTT_USERNAME=<account>` and `MQTT_PASSWORD=<its password>`, then:
+   ```bash
+   docker compose up -d
+   ```
+5. **Check** from any machine with the Mosquitto clients:
+   ```bash
+   mosquitto_sub -h mqtt.<domain> -p 8883 --capath /etc/ssl/certs -u esp32 -P '<password>' -t 'fcpx/#' -v
+   ```
+   then `docker compose restart data-api`: its startup lines show up on `fcpx/raw/dataapi/info`.
+
+### Everyday
+
+```bash
+mosquitto/passwd.sh <account>       # change a password (reloaded without disconnecting clients)
+mosquitto/passwd.sh -D <account>    # delete an account
+docker compose logs -f mosquitto    # refused logins, ACL denials
+```
+
+A new service needs its own block in `mosquitto/config/acl` (explicit `user` rules: a `pattern` rule would apply to the ESP32 too) and an account.
+
+Mosquitto prints harmless warnings at startup: `chown: … Read-only file system` (its entrypoint tries to chown the read-only mounts) and `acl has world readable permissions`.
 
 ## Everyday commands (on the VPS, in `~/deploy`)
 

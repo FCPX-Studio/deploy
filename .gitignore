@@ -2,5 +2,7 @@
 .env
 env/*.env
 !env/*.env.example
+# MQTT accounts and certificate (mosquitto/passwd.sh, mosquitto/sync-certs.sh)
+mosquitto/secrets/
 
 .DS_Store

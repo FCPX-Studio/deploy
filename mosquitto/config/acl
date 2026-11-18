@@ -1,0 +1,25 @@
+# Topics: fcpx/<raw|event>/<service>/... (see the logger package README)
+#
+# One account per service, named after its LOG_SERVICE: it can only publish under its own name.
+# Explicit rules, not `pattern write fcpx/raw/%u/#`: a pattern applies to every account, the ESP32 included.
+# A new service needs its own block here, and an account (mosquitto/passwd.sh <service>).
+
+user dataapi
+topic write fcpx/raw/dataapi/#
+topic write fcpx/event/dataapi/#
+
+user eventapi
+topic write fcpx/raw/eventapi/#
+topic write fcpx/event/eventapi/#
+
+user authapi
+topic write fcpx/raw/authapi/#
+topic write fcpx/event/authapi/#
+
+user paddlesync
+topic write fcpx/raw/paddlesync/#
+topic write fcpx/event/paddlesync/#
+
+# The ESP32: read only
+user esp32
+topic read fcpx/#
