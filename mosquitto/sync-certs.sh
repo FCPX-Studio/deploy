@@ -31,13 +31,15 @@ if [[ -f "$dest/cert.sha256" && "$(cat "$dest/cert.sha256")" == "$sum" ]]; then
   exit 0
 fi
 
-# Installed as root in the Mosquitto image, owned by its mosquitto user (uid 1883)
+# Installed as root in the Mosquitto image, owned by its mosquitto user (uid 1883). The checksum too:
+# Docker creates mosquitto/secrets/ as root when it mounts it before it exists, so this user can't write there
+echo "$sum" > "$tmp/cert.sha256"
 docker compose run --rm --no-deps -T -v "$PWD/$dest:/secrets" -v "$tmp:/new:ro" --entrypoint sh mosquitto -c '
   set -e
   install -o 1883 -g 1883 -m 644 /new/cert.pem /secrets/cert.pem
   install -o 1883 -g 1883 -m 600 /new/key.pem /secrets/key.pem
+  install -o 1883 -g 1883 -m 644 /new/cert.sha256 /secrets/cert.sha256
 '
-echo "$sum" > "$dest/cert.sha256"
 
 # A full restart loads the new certificate; the ESP32 and the services reconnect on their own
 docker compose up -d mosquitto >/dev/null
